@@ -1,0 +1,6 @@
+{
+  "name": "Neon Shadows",
+  "description": "Un videogioco investigativo cyberpunk multiplayer e singleplayer con sospetti gestiti da IA generative.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
