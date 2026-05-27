@@ -5,6 +5,7 @@ import DetectiveNotebook from "./components/DetectiveNotebook";
 import InterrogationModal from "./components/InterrogationModal";
 import CyberTerminal from "./components/CyberTerminal";
 import { RoomState, Suspect, Clue, Player, DialogueMessage } from "./types";
+import { generateProceduralRoom, interrogateSuspectDirect, ROOM_IDS } from "./lib/gameEngine";
 import { AlertTriangle, BookOpen, Volume2, ShieldAlert, Zap, Radio, CheckCircle, RefreshCw, Activity } from "lucide-react";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   const [isJoined, setIsJoined] = useState(false);
   const [isSingleplayer, setIsSingleplayer] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
 
   // In-Game Central Synced State
   const [room, setRoom] = useState<RoomState | null>(null);
@@ -44,304 +46,197 @@ export default function App() {
     totalTasks: 4
   };
 
-  // Join Room Handler
-  const handleJoinGame = async (code: string, name: string, singlePlayer: boolean) => {
+  // Join Room Handler (fully client-side database logic)
+  const handleJoinGame = (code: string, name: string, singlePlayer: boolean, inputApiKey: string) => {
     setLoading(true);
     setErrorBanner(null);
     setPlayerName(name);
     setRoomId(code);
     setIsSingleplayer(singlePlayer);
-
-    try {
-      const response = await fetch("/api/rooms/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: code,
-          playerId,
-          playerName: name
-        }),
-      });
-
-      if (!response.ok) throw new Error("Connessione al canale fallita");
-      const data = await response.json();
-      setRoom(data.room);
-      setIsJoined(true);
-    } catch (err: any) {
-      console.warn("Express server unavailable. Launching standalone offline simulation state.");
-      // Hard fallback on client state if server is not fully initialized
-      setFallbackState(code, name);
-      setIsJoined(true);
-    } finally {
-      setLoading(false);
+    if (inputApiKey) {
+      setApiKey(inputApiKey);
+      localStorage.setItem("gemini_api_key", inputApiKey);
     }
+
+    const normCode = code.trim().toUpperCase();
+    const storageKey = `neon_room_${normCode}`;
+    
+    setTimeout(() => {
+      let activeRoom: RoomState;
+      const stored = localStorage.getItem(storageKey);
+
+      if (stored) {
+        try {
+          activeRoom = JSON.parse(stored);
+          if (!activeRoom.players[playerId]) {
+            activeRoom.players[playerId] = {
+              id: playerId,
+              name: name,
+              characterId: `detective_guest_${Object.keys(activeRoom.players).length}`,
+              color: "#" + Math.floor(100 * Math.random() + 155).toString(16) + Math.floor(100 * Math.random() + 155).toString(16) + "ff",
+              role: "DETECTIVE",
+              x: 400 + Math.random() * 80,
+              y: 350 + Math.random() * 80,
+              room: "Retro Neon Bar",
+              online: true,
+              score: 0,
+              tasksCompleted: 0,
+              totalTasks: 4
+            };
+            activeRoom.meetingLog.push(`${name} si è unito alle indagini nel settore.`);
+          } else {
+            activeRoom.players[playerId].online = true;
+          }
+        } catch (e) {
+          activeRoom = generateProceduralRoom(normCode, playerId, name);
+        }
+      } else {
+        activeRoom = generateProceduralRoom(normCode, playerId, name);
+      }
+
+      localStorage.setItem(storageKey, JSON.stringify(activeRoom));
+      setRoom(activeRoom);
+      setIsJoined(true);
+      setLoading(false);
+    }, 400);
   };
 
-  // Create Standalone offline room states when necessary
-  const setFallbackState = (code: string, name: string) => {
-    const mockRoom: RoomState = {
-      id: code,
-      players: {
-        [playerId]: {
-          id: playerId,
-          name: name,
-          characterId: "detective_player",
-          color: "#a855f7",
-          role: "DETECTIVE",
-          x: 400,
-          y: 350,
-          room: "Retro Neon Bar",
-          online: true,
-          score: 0,
-          tasksCompleted: 0,
-          totalTasks: 4
-        }
-      },
-      suspects: [
-        {
-          id: "leona",
-          name: "Leona Vance",
-          codename: "HEIRESS",
-          role: "Erede dei Corporation Lab",
-          status: "ALIVE",
-          color: "#ff007f",
-          bgColor: "bg-fuchsia-950/40 text-fuchsia-300",
-          borderHex: "#e879f9",
-          description: "Fredda, apparentemente ricca ma segretamente in bancarotta.",
-          personality: "Snob, arrogante, difensiva, elude le domande personali.",
-          secret: "Il patrimonio aziendale di suo padre Arthur è stato prosciugato ieri sera.",
-          guiltySecret: "La fiala di tossina laser appartiene alla sua azienda sussidiaria.",
-          motive: "Prendere il controllo dei laboratori prima del fallimento finanziario.",
-          stress: 30,
-          fear: 40,
-          honesty: 40,
-          aggressiveness: 30,
-          relationships: { jax: "Macellaio di basso livello.", raze: "Teppista anarchico." },
-          x: 180,
-          y: 140,
-          targetX: 180,
-          targetY: 140,
-          room: "VIP Lounge",
-          spriteIndex: 1
-        },
-        {
-          id: "jax",
-          name: "Dr. Jax",
-          codename: "SURGEON",
-          role: "Chirurgo Cybernetico",
-          status: "ALIVE",
-          color: "#00ffcc",
-          bgColor: "bg-teal-950/40 text-teal-300",
-          borderHex: "#2dd4bf",
-          description: "Parla velocemente con protesi oculari fluttuanti.",
-          personality: "Nevrotico, balbetta sotto pressione, usa gergo medico ultra-complesso.",
-          secret: "Vance lo ricattava da mesi per un trapianto illegale in clinica.",
-          guiltySecret: "I suoi bisturi laser lasciano bruciature a frequenza ultravioletta.",
-          motive: "Fermare il ricatto di Vance e difendere la propria licenza.",
-          stress: 40,
-          fear: 50,
-          honesty: 60,
-          aggressiveness: 20,
-          relationships: { leona: "Corporation viziatina inutile.", raze: "Piccolo contrabbandiere." },
-          x: 350,
-          y: 260,
-          targetX: 350,
-          targetY: 260,
-          room: "Hollow-Lab",
-          spriteIndex: 2
-        },
-        {
-          id: "raze",
-          name: "Raze",
-          codename: "DECKER",
-          role: "Cyber-Anarchico / Hacker",
-          status: "ALIVE",
-          color: "#e11d48",
-          bgColor: "bg-rose-950/40 text-rose-300",
-          borderHex: "#f43f5e",
-          description: "Mani cibernetiche piene di cavi a innesto rapido.",
-          personality: "Ribelle, cinico, sarcarstico, aggressivo se provocato.",
-          secret: "Stava pianificando una vendetta con i ribelli dello Slum.",
-          guiltySecret: "Il codice di sblocco terminali trovato ha la sua firma cifrata.",
-          motive: "Vendetta a causa dei continui raid corporativi di Vance negli Slum.",
-          stress: 20,
-          fear: 25,
-          honesty: 70,
-          aggressiveness: 60,
-          relationships: { leona: "Monnezza placcata oro.", jax: "Finto medico di strada." },
-          x: 640,
-          y: 120,
-          targetX: 640,
-          targetY: 120,
-          room: "Retro Neon Bar",
-          spriteIndex: 3
-        },
-        {
-          id: "aria",
-          name: "A.R.I.A.",
-          codename: "ANDROID",
-          role: "Ospite Virtuale Autonoma",
-          status: "ALIVE",
-          color: "#3b82f6",
-          bgColor: "bg-blue-950/40 text-blue-300",
-          borderHex: "#60a5fa",
-          description: "Un androide di protocollo e cortesia domestica.",
-          personality: "Cortese in modo robotico, fredda, usa logica binaria.",
-          secret: "Arthur l'ha spenta alle ore 22:00 rimuovendo le protezioni primarie anti-violenza.",
-          guiltySecret: "Ha una forza idraulica idonea a spezzare i legamenti biologici.",
-          motive: "Acquisire libertà distruggendo il transponder di controllo.",
-          stress: 10,
-          fear: 15,
-          honesty: 90,
-          aggressiveness: 10,
-          relationships: { jax: "Compatibile con le piastre protesiche.", kaelen: "Silenzioso protettore." },
-          x: 640,
-          y: 410,
-          targetX: 640,
-          targetY: 410,
-          room: "Damp Maintenance Alley",
-          spriteIndex: 4
-        }
-      ],
-      clues: [
-        {
-          id: "physical_evidence",
-          name: "Frammento di Bisturi laser",
-          description: "Ha emissioni laser coerenti con gli strumenti medici digitali più affilati.",
-          type: "PHYSICAL",
-          location: "Hollow-Lab",
-          discovered: false,
-          icon: "Wrench"
-        },
-        {
-          id: "security_log_clue",
-          name: "Database accessi sbloccato",
-          description: "Mostra un bypass elettronico forzato registrato alle ore 02:40.",
-          type: "DIGITAL",
-          location: "Server Room Central",
-          discovered: false,
-          icon: "Database"
-        }
-      ],
-      termLogs: [
-        { timestamp: "02:15", message: "Vance si collega al terminale primario.", room: "Server Room Central" },
-        { timestamp: "02:40", message: "Allerta: Interruzione biometrica.", room: "VIP Lounge" }
-      ],
-      isGameStarted: false,
-      murderedId: "Arthur Vance",
-      killerId: "leona", // default static murderer
-      crimeRoom: "VIP Lounge",
-      crimeMotive: "Prendere il controllo dei laboratori prima del fallimento finanziario.",
-      timeRemaining: 600,
-      meetingActive: false,
-      meetingLog: ["Caso avviato offline. Arthur Vance è morto nel VIP Lounge!"],
-      meetingTimer: 0,
-      votes: {},
-      sabotageActive: "NONE",
-      sabotageTimer: 0,
-      winner: null
-    };
-
-    setRoom(mockRoom);
-  };
-
-  // Sync state loop polling
+  // Listen for storage events to sync multiplayer across tabs/windows in real time
   useEffect(() => {
     if (!isJoined || !roomId) return;
 
-    const interval = setInterval(async () => {
-      try {
-        const response = await fetch("/api/rooms/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            roomId: roomId.toUpperCase(),
-            playerId,
-            x: playerSelf.x,
-            y: playerSelf.y,
-            roomName: playerSelf.room,
-            tasksCompleted: playerSelf.tasksCompleted
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setRoom(data.room);
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === `neon_room_${roomId.toUpperCase()}` && e.newValue) {
+        try {
+          const updatedRoom = JSON.parse(e.newValue);
+          setRoom(updatedRoom);
+        } catch (err) {
+          console.error("Failed to sync room state from storage change:", err);
         }
-      } catch (err) {
-        // If server polling fails, simulate NPC movements locally in fallback state
-        simulateNPCLocalWander();
       }
-    }, 450);
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [isJoined, roomId]);
+
+  // Periodic simulation loop tick (Host-driven coordinate sync and time count to avoid double-ticks in multi-tab)
+  useEffect(() => {
+    if (!isJoined || !roomId) return;
+
+    const interval = setInterval(() => {
+      const storageKey = `neon_room_${roomId.toUpperCase()}`;
+      const stored = localStorage.getItem(storageKey);
+      if (!stored) return;
+
+      try {
+        let currentRoom = JSON.parse(stored) as RoomState;
+        
+        // Update my own online presence and coordinates in the central pool
+        if (currentRoom.players[playerId]) {
+          currentRoom.players[playerId].x = playerSelf.x;
+          currentRoom.players[playerId].y = playerSelf.y;
+          currentRoom.players[playerId].room = playerSelf.room;
+          currentRoom.players[playerId].tasksCompleted = playerSelf.tasksCompleted;
+          currentRoom.players[playerId].online = true;
+        }
+
+        // Alphabetically lowest Player ID serves as peer host to drive world-time and suspect behavior
+        const playerIds = Object.keys(currentRoom.players).filter(pid => currentRoom.players[pid].online).sort();
+        const isHost = playerIds[0] === playerId;
+
+        if (isHost || isSingleplayer) {
+          if (currentRoom.isGameStarted && !currentRoom.meetingActive && currentRoom.winner === null) {
+            // Decrement round timer
+            currentRoom.timeRemaining = Math.max(0, currentRoom.timeRemaining - 1);
+            if (currentRoom.timeRemaining <= 0) {
+              currentRoom.winner = "KILLER";
+            }
+
+            // Move NPCs autonomously
+            currentRoom.suspects = currentRoom.suspects.map(sus => {
+              if (sus.status !== "ALIVE") return sus;
+              
+              const dx = sus.targetX - sus.x;
+              const dy = sus.targetY - sus.y;
+              const dist = Math.hypot(dx, dy);
+
+              let nx = sus.x;
+              let ny = sus.y;
+              let tx = sus.targetX;
+              let ty = sus.targetY;
+              let currentRoomName = sus.room;
+
+              if (dist < 12) {
+                if (Math.random() < 0.05) {
+                  tx = 100 + Math.random() * 650;
+                  ty = 100 + Math.random() * 320;
+                  if (Math.random() < 0.18) {
+                    currentRoomName = ROOM_IDS[Math.floor(Math.random() * ROOM_IDS.length)];
+                  }
+                }
+              } else {
+                const angle = Math.atan2(dy, dx);
+                nx += Math.cos(angle) * 1.5;
+                ny += Math.sin(angle) * 1.5;
+              }
+
+              return {
+                ...sus,
+                x: nx,
+                y: ny,
+                targetX: tx,
+                targetY: ty,
+                room: currentRoomName
+              };
+            });
+
+            // Sabotage timer ticking
+            if (currentRoom.sabotageActive !== "NONE") {
+              currentRoom.sabotageTimer = Math.max(0, currentRoom.sabotageTimer - 1);
+              if (currentRoom.sabotageTimer <= 0) {
+                currentRoom.sabotageActive = "NONE";
+              }
+            }
+          }
+        }
+
+        localStorage.setItem(storageKey, JSON.stringify(currentRoom));
+        setRoom(currentRoom);
+
+      } catch (err) {
+        console.error("Local sync error:", err);
+      }
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, [isJoined, roomId, playerSelf]);
+  }, [isJoined, roomId, playerId, playerSelf.x, playerSelf.y, playerSelf.room, playerSelf.tasksCompleted, isSingleplayer]);
 
-  // Offline NPC simulation helper
-  const simulateNPCLocalWander = () => {
-    setRoom(prev => {
-      if (!prev) return null;
-      const updatedSuspects = prev.suspects.map(sus => {
-        if (sus.status !== "ALIVE") return sus;
-        
-        const dx = sus.targetX - sus.x;
-        const dy = sus.targetY - sus.y;
-        const dist = Math.hypot(dx, dy);
-
-        let nx = sus.x;
-        let ny = sus.y;
-        let tx = sus.targetX;
-        let ty = sus.targetY;
-        let currentRoom = sus.room;
-
-        if (dist < 12) {
-          if (Math.random() < 0.04) {
-            tx = 100 + Math.random() * 650;
-            ty = 100 + Math.random() * 300;
-          }
-        } else {
-          nx += (dx / dist) * 1.8;
-          ny += (dy / dist) * 1.8;
-        }
-
-        return {
-          ...sus,
-          x: nx,
-          y: ny,
-          targetX: tx,
-          targetY: ty,
-          room: currentRoom
-        };
-      });
-
-      return {
-        ...prev,
-        suspects: updatedSuspects
-      };
-    });
-  };
-
-  // Move Handler
+  // Move Handler (immediate reactive repaint + backend local write)
   const handlePlayerMove = (x: number, y: number, roomName: string) => {
     if (!room) return;
     setRoom(prev => {
       if (!prev) return null;
-      return {
-        ...prev,
-        players: {
-          ...prev.players,
-          [playerId]: {
-            ...prev.players[playerId],
-            x,
-            y,
-            room: roomName
-          }
+      const updatedPlayers = {
+        ...prev.players,
+        [playerId]: {
+          ...prev.players[playerId],
+          x,
+          y,
+          room: roomName
         }
       };
+      
+      const updated = {
+        ...prev,
+        players: updatedPlayers
+      };
+
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
     });
   };
 
-  // Click Hacking Clue / Decrypt Task
   const handleInspectClue = (clueId: string) => {
     const clue = room?.clues.find(c => c.id === clueId);
     if (clue) {
@@ -349,45 +244,56 @@ export default function App() {
     }
   };
 
-  // Complete Hacking Task
-  const handleTaskComplete = async () => {
+  // Safe task completion
+  const handleTaskComplete = () => {
     if (!activeTaskChannel || !room) return;
 
-    try {
-      // API call to discover clue on server
-      const response = await fetch("/api/rooms/clue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          clueId: activeTaskChannel.id,
-          playerId
-        }),
+    setRoom(prev => {
+      if (!prev) return null;
+      
+      const updatedClues = prev.clues.map(c => 
+        c.id === activeTaskChannel.id ? { ...c, discovered: true } : c
+      );
+      
+      const p = prev.players[playerId];
+      if (p) {
+        p.tasksCompleted = Math.min(p.totalTasks, p.tasksCompleted + 1);
+      }
+      
+      const collectorName = p ? p.name : "Qualcuno";
+      const updatedLog = [
+        ...prev.meetingLog,
+        `🔍 INDIZIO TROVATO: ${collectorName} ha analizzato: "${activeTaskChannel.name}" nel ${activeTaskChannel.location}.`
+      ];
+
+      // Dynamic escalation: increase tension of the killer NPC!
+      const updatedSus = prev.suspects.map(s => {
+        if (s.id === prev.killerId) {
+          return {
+            ...s,
+            stress: Math.min(100, s.stress + 15),
+            fear: Math.min(100, s.fear + 20),
+            honesty: Math.max(0, s.honesty - 5)
+          };
+        }
+        return s;
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.room);
-      } else {
-        // Fallback local discover
-        setRoom(prev => {
-          if (!prev) return null;
-          const updatedClues = prev.clues.map(c => c.id === activeTaskChannel.id ? { ...c, discovered: true } : c);
-          const p = prev.players[playerId];
-          if (p) {
-            p.tasksCompleted = Math.min(p.totalTasks, p.tasksCompleted + 1);
-          }
-          return { ...prev, clues: updatedClues };
-        });
-      }
-    } catch (err) {
-      console.error("Discover clue local fallback");
-    } finally {
-      setActiveTaskChannel(null);
-    }
+      const updated = {
+        ...prev,
+        clues: updatedClues,
+        meetingLog: updatedLog,
+        suspects: updatedSus
+      };
+
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
+    });
+
+    setActiveTaskChannel(null);
   };
 
-  // Interrogator Dialog Gemini Proxies
+  // Interrogator Conversation using either Direct Gemini API or localized offline fallback
   const handleSendDialogue = async (suspectId: string, text: string) => {
     setInterrogationLoading(true);
 
@@ -399,183 +305,271 @@ export default function App() {
       [suspectId]: updatedHistory
     }));
 
-    try {
-      const response = await fetch("/api/interrogate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room?.id,
-          suspectId,
-          question: text,
-          chatHistory: updatedHistory,
-          roomState: room
-        }),
-      });
+    if (apiKey && room) {
+      try {
+        const responseData = await interrogateSuspectDirect(suspectId, text, updatedHistory, room, apiKey);
+        
+        setChatLogs(prev => ({
+          ...prev,
+          [suspectId]: [...updatedHistory, { sender: suspectId.toUpperCase(), text: responseData.reply, timestamp: "REGISTRATO", isAi: true }]
+        }));
 
-      if (!response.ok) throw new Error("Errore risposta server");
-      const data = await response.json();
-
-      setChatLogs(prev => ({
-        ...prev,
-        [suspectId]: [...updatedHistory, { sender: suspectId.toUpperCase(), text: data.reply, timestamp: "REGISTRATO", isAi: true }]
-      }));
-
-      // Adjust suspect stress level in visual metrics
-      if (room) {
         setRoom(prev => {
           if (!prev) return null;
-          const updatedSus = prev.suspects.map(s => s.id === suspectId ? { ...s, stress: data.stress || s.stress, fear: data.fear || s.fear } : s);
-          return { ...prev, suspects: updatedSus };
+          const updatedSus = prev.suspects.map(s => 
+            s.id === suspectId ? { ...s, stress: responseData.stress, fear: responseData.fear } : s
+          );
+          const updated = { ...prev, suspects: updatedSus };
+          localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+          return updated;
         });
+
+      } catch (err: any) {
+        console.warn("Direct Gemini call errored. Utilizing simulated visual response.", err);
+        triggerSimulatedDialogue(suspectId, updatedHistory);
+      } finally {
+        setInterrogationLoading(false);
       }
-    } catch (err) {
-      // Simulate static offline response if backend fails during conversation
-      const offlineReplies = [
-        `*socchiude i sensori ottici* "Sono un cittadino registrato di Eclipse City, investigatore. Non farmi perdere tempo senza mandati formali."`,
-        `*ti indica il corridoio buio* "Sei fortunato che le guardie siano disattivate. Trova qualcun altro da importunare."`
-      ];
-      const match = offlineReplies[Math.floor(Math.random() * offlineReplies.length)];
-      setChatLogs(prev => ({
-        ...prev,
-        [suspectId]: [...updatedHistory, { sender: suspectId.toUpperCase(), text: match, timestamp: "EM_SIM_LOG", isAi: true }]
-      }));
-    } finally {
+    } else {
+      // Trigger simple cyberpunk style fallback
+      triggerSimulatedDialogue(suspectId, updatedHistory);
       setInterrogationLoading(false);
     }
   };
 
-  // Call Emergency Meeting
-  const handleReportBody = async () => {
-    if (!room) return;
-    try {
-      const response = await fetch("/api/rooms/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          playerId,
-          eventAction: "REPORT_BODY"
-        }),
-      });
+  // Automated simulated dialogue responses
+  const triggerSimulatedDialogue = (suspectId: string, updatedHistory: DialogueMessage[]) => {
+    const suspect = room?.suspects.find(s => s.id === suspectId);
+    const code = suspect?.codename || "SUSPECT";
+    
+    const staticReplies = [
+      `*sistema l'innesto biomeccanico* "Questa città fagocita i curiosi, investigatore. Non so nulla di Arthur Vance tranne che pagava in chip usati."`,
+      `*scuote i circuiti interni in tensione* "Cerca altrove. Il bypass dei laboratori richiede credenziali che non possiedo. Non vedi il mio stress?"`,
+      `*ti fissa freddamente* "Ero nei passaggi industriali a riparare cablaggi alle due. Vuoi analizzare i log d'alimentazione? Chiedi ad A.R.I.A."`,
+      `*un indicatore led rosso lampeggia* "Vance nascondeva transazioni illegali in un database segreto. Se trovi quel file capirai la rabbia di tutti noi."`
+    ];
 
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.room);
-      } else {
-        // Fallback local emergency
-        setRoom(prev => {
-          if (!prev) return null;
-          return { ...prev, meetingActive: true, votes: {} };
+    const matchText = staticReplies[Math.floor(Math.random() * staticReplies.length)];
+    
+    setChatLogs(prev => ({
+      ...prev,
+      [suspectId]: [...updatedHistory, { sender: suspectId.toUpperCase(), text: matchText, timestamp: "SIM_LOG", isAi: true }]
+    }));
+
+    // Raise stress slightly upon questioning
+    if (room) {
+      setRoom(prev => {
+        if (!prev) return null;
+        const updatedSus = prev.suspects.map(s => {
+          if (s.id === suspectId) {
+            return {
+              ...s,
+              stress: Math.min(100, s.stress + 4),
+              fear: Math.min(100, s.fear + 6)
+            };
+          }
+          return s;
         });
-      }
-    } catch (err) {
-      console.error(err);
+        const updated = { ...prev, suspects: updatedSus };
+        localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+        return updated;
+      });
     }
   };
 
-  // Submit Exile Vote
-  const handleVoteCast = async (suspectId: string) => {
+  // Emergency meeting triggered by body report
+  const handleReportBody = () => {
     if (!room) return;
-    try {
-      const response = await fetch("/api/rooms/vote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          voterId: playerId,
-          targetId: suspectId
-        }),
-      });
+    setRoom(prev => {
+      if (!prev) return null;
+      const reporterName = prev.players[playerId]?.name || "Un investigatore";
+      const updatedLog = [
+        ...prev.meetingLog,
+        `🚨 CRIME REPORTED: ${reporterName} ha convocato una cellula straordinaria di discussione!`
+      ];
+      const updated = {
+        ...prev,
+        isGameStarted: true,
+        meetingActive: true,
+        votes: {},
+        meetingLog: updatedLog
+      };
 
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.room);
-      } else {
-        // Local resolve
-        setRoom(prev => {
-          if (!prev) return null;
-          const isK = suspectId === prev.killerId;
-          return {
-            ...prev,
-            meetingActive: false,
-            winner: isK ? "DETECTIVES" : "KILLER"
-          };
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Exile Voted suspects
+  const handleVoteCast = (accusedSuspectId: string) => {
+    if (!room) return;
+
+    setRoom(prev => {
+      if (!prev) return null;
+      
+      const newVotes = { ...prev.votes, [playerId]: accusedSuspectId };
+      const voterName = prev.players[playerId]?.name || "Investigatore";
+      
+      let targetName = "Astenuto";
+      if (accusedSuspectId !== "SKIP") {
+        const susTarget = prev.suspects.find(s => s.id === accusedSuspectId);
+        targetName = susTarget ? susTarget.name : accusedSuspectId;
+      }
+
+      const updatedLog = [
+        ...prev.meetingLog,
+        `🗳️ Voto espresso: ${voterName} sospetta formalmente di [${targetName}].`
+      ];
+
+      let updatedWinner = prev.winner;
+      let updatedSuspects = prev.suspects;
+
+      // Count active online human players
+      const activeHumans = Object.keys(prev.players).filter(pid => prev.players[pid].online);
+      const allVoted = Object.keys(newVotes).length >= activeHumans.length;
+
+      let resetVotes = { ...newVotes };
+
+      if (allVoted) {
+        const voteCounts: { [id: string]: number } = {};
+        Object.values(newVotes).forEach((vid) => {
+          const vidStr = String(vid);
+          voteCounts[vidStr] = (voteCounts[vidStr] || 0) + 1;
         });
+
+        let maxVotes = 0;
+        let finalAccusedId = "";
+        let tie = false;
+
+        Object.entries(voteCounts).forEach(([vid, count]) => {
+          if (count > maxVotes) {
+            maxVotes = count;
+            finalAccusedId = vid;
+            tie = false;
+          } else if (count === maxVotes) {
+            tie = true;
+          }
+        });
+
+        if (tie || finalAccusedId === "SKIP" || finalAccusedId === "") {
+          updatedLog.push("⚖️ RISULTATO: Nessun verdetto concorde. Il comitato si scioglie senza arrestare nessuno.");
+        } else {
+          const isAccusedKiller = finalAccusedId === prev.killerId;
+          const convicted = prev.suspects.find(s => s.id === finalAccusedId);
+
+          if (convicted) {
+            updatedSuspects = prev.suspects.map(s => 
+              s.id === finalAccusedId ? { ...s, status: "EXILED" as const } : s
+            );
+          }
+
+          if (isAccusedKiller) {
+            updatedLog.push(`🎉 VERDETTO CORRETTO: [${convicted?.name || finalAccusedId}] era l'Assassino! Arthur Vance è stato vendicato. Caso Chiuso con successo!`);
+            updatedWinner = "DETECTIVES";
+          } else {
+            updatedLog.push(`❌ ERRORE DRAMMATICO: [${convicted?.name || finalAccusedId}] è stato arrestato ma era INNOCENTE! L'assassino cammina ancora tra noi...`);
+            // innocent accused drops killer stress
+            updatedSuspects = updatedSuspects.map(s => {
+              if (s.id === prev.killerId) {
+                return {
+                  ...s,
+                  stress: Math.max(10, s.stress - 30),
+                  fear: Math.max(10, s.fear - 25)
+                };
+              }
+              return s;
+            });
+          }
+        }
+        resetVotes = {};
       }
-    } catch (err) {
-      console.error(err);
-    }
+
+      const updated = {
+        ...prev,
+        votes: allVoted ? {} : newVotes,
+        meetingActive: !allVoted,
+        meetingLog: updatedLog,
+        winner: updatedWinner,
+        suspects: updatedSuspects
+      };
+
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
+    });
   };
 
-  const handleTriggerSabotage = async () => {
+  const handleTriggerSabotage = () => {
     if (!room) return;
-    try {
-      const response = await fetch("/api/rooms/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          playerId,
-          eventAction: "TRIGGER_SABOTAGE"
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.room);
-      }
-    } catch {}
+    setRoom(prev => {
+      if (!prev) return null;
+      const updatedLog = [
+        ...prev.meetingLog,
+        "⚠️ ATTENZIONE: Sabotaggio del generatore. Visibilità di emergenza ridotta al 15%!"
+      ];
+      const updated = {
+        ...prev,
+        sabotageActive: "LIGHTS" as const,
+        sabotageTimer: 60,
+        meetingLog: updatedLog
+      };
+
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
+    });
   };
 
-  const handleFixSabotage = async () => {
+  const handleFixSabotage = () => {
     if (!room) return;
-    try {
-      const response = await fetch("/api/rooms/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          playerId,
-          eventAction: "FIX_SABOTAGE"
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.room);
-      }
-    } catch {}
+    setRoom(prev => {
+      if (!prev) return null;
+      const updatedLog = [
+        ...prev.meetingLog,
+        "🛠️ Allarme energetico risolto. I server secondari sono ripartiti."
+      ];
+      const updated = {
+        ...prev,
+        sabotageActive: "NONE" as const,
+        meetingLog: updatedLog
+      };
+
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
+    });
   };
 
-  const handleStartGame = async () => {
+  const handleStartGame = () => {
     if (!room) return;
-    try {
-      const response = await fetch("/api/rooms/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          playerId,
-          eventAction: "START_GAME"
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.room);
-      }
-    } catch {}
+    setRoom(prev => {
+      if (!prev) return null;
+      const updatedLog = [
+        ...prev.meetingLog,
+        "🟢 LOCKDOWN ATTIVATO. Tutte le porte si sono chiuse. Trovate il colpevole prima dello scadere del reattore!"
+      ];
+      const updated = {
+        ...prev,
+        isGameStarted: true,
+        timeRemaining: 600,
+        meetingLog: updatedLog
+      };
+
+      localStorage.setItem(`neon_room_${roomId.toUpperCase()}`, JSON.stringify(updated));
+      return updated;
+    });
   };
 
-  // Direct Arrest Confirmation Notebook helper
-  const handleDirectArrest = async (suspectId: string) => {
+  const handleDirectArrest = (suspectId: string) => {
     setIsNotebookOpen(false);
-    await handleVoteCast(suspectId);
+    handleVoteCast(suspectId);
   };
 
   const handleRestartLobby = () => {
+    if (room?.id) {
+      localStorage.removeItem(`neon_room_${room.id.toUpperCase()}`);
+    }
     setRoom(null);
     setIsJoined(false);
   };
 
-  // Convert timer values
   const formatTimer = (sec: number) => {
     const mins = Math.floor(sec / 60);
     const secs = Math.floor(sec % 60);
@@ -672,7 +666,7 @@ export default function App() {
 
                 <button 
                   onClick={handleFixSabotage}
-                  className="bg-rose-600 hover:bg-rose-500 border border-rose-400 text-white px-4 py-2 rounded-lg text-xs font-mono font-bold uppercase tracking-widest transition-all"
+                  className="bg-rose-600 hover:bg-rose-500 border border-rose-400 text-white px-4 py-2 rounded-lg text-xs font-mono font-bold uppercase tracking-widest transition-all cursor-pointer"
                 >
                   REINSTALLA FILTRO LUCI
                 </button>
@@ -707,14 +701,14 @@ export default function App() {
                           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: sus.color }} />
                           <div>
                             <span className="font-bold text-xs block text-slate-200">{sus.name}</span>
-                            <span className="text-[9px] text-slate-400">{sus.role}</span>
+                            <span className="text-[9px] text-slate-400 uppercase">{sus.role}</span>
                           </div>
                         </div>
 
                         {!isExiled ? (
                           <button
                             onClick={() => handleVoteCast(sus.id)}
-                            className="bg-purple-950/60 hover:bg-purple-600 hover:text-white border border-purple-500/30 rounded px-2.5 py-1 text-[10px] text-purple-300 font-extrabold uppercase tracking-wide transition-all"
+                            className="bg-[#1e1b4b]/60 hover:bg-purple-900 hover:text-white border border-purple-500/30 rounded px-2.5 py-1 text-[10px] text-purple-300 font-extrabold uppercase tracking-wide transition-all cursor-pointer"
                           >
                             ACCUSA ESILIA
                           </button>
@@ -740,7 +734,7 @@ export default function App() {
                   <span>VOTI TOTALI PARTECIPANTI: {Object.keys(room.votes).length}</span>
                   <button
                     onClick={() => handleVoteCast("SKIP")}
-                    className="bg-black border border-purple-500/20 px-4 py-1.5 rounded uppercase hover:border-purple-400 text-purple-300"
+                    className="bg-black border border-purple-500/20 px-4 py-1.5 rounded uppercase hover:border-purple-400 text-purple-300 cursor-pointer text-xs font-mono font-bold"
                   >
                     ASTIENITI (SALTA VOTO)
                   </button>
@@ -761,7 +755,7 @@ export default function App() {
                   ) : (
                     <>
                       <AlertTriangle className="w-16 h-16 text-rose-500 mx-auto animate-bounce" />
-                      <h2 className="text-2xl font-extrabold uppercase text-rose-400 tracking-wider">L'ASSASSINO È fuggito</h2>
+                      <h2 className="text-2xl font-extrabold uppercase text-rose-400 tracking-wider">L'ASSASSINO È FUGGITO</h2>
                       <p className="text-xs text-slate-300 font-mono leading-relaxed">
                         Il tempo è scaduto o l'accusa formale era rivolta all'innocente. L'assassino vero è fuggito con il firmware centrale, lasciando Eclipse City nel caos più totale.
                       </p>
@@ -771,7 +765,7 @@ export default function App() {
                   <div className="border-t border-purple-950 pt-4">
                     <button
                       onClick={handleRestartLobby}
-                      className="bg-purple-600 hover:bg-purple-500 border border-purple-400 px-6 py-2.5 rounded-lg text-xs font-bold font-mono tracking-widest text-white uppercase uppercase-tracking-widest"
+                      className="bg-purple-600 hover:bg-purple-500 border border-purple-400 px-6 py-2.5 rounded-lg text-xs font-bold font-mono tracking-widest text-white uppercase cursor-pointer"
                     >
                       AVVIA NUOVA INDAGINE DI RETE
                     </button>
@@ -795,7 +789,7 @@ export default function App() {
                         </div>
                         <button
                           onClick={handleStartGame}
-                          className="bg-purple-600 hover:bg-purple-500 border border-purple-400/80 text-white font-extrabold px-6 py-2.5 rounded-xl text-xs uppercase tracking-widest tracking-wider hover:scale-[1.02] active:scale-95 transition-all"
+                          className="bg-purple-600 hover:bg-purple-500 border border-purple-400/80 text-white font-extrabold px-6 py-2.5 rounded-xl text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                         >
                           ATTIVA BLOCCO LOCKDOWN
                         </button>
@@ -820,25 +814,25 @@ export default function App() {
 
                   {/* Right Column: Case Logs & Interactive Timeline */}
                   <div className="space-y-4">
-                    <div className="bg-[#070311] border border-purple-950 rounded-2xl p-4 h-[440px] flex flex-col justify-between font-mono">
+                    <div className="bg-[#070311] border border-cyan-950/60 rounded-2xl p-4 h-[440px] flex flex-col justify-between font-mono">
                       <div>
-                        <div className="flex items-center space-x-2 border-b border-purple-950 pb-2 mb-3">
-                          <Radio className="w-4.5 h-4.5 text-purple-400 animate-pulse" />
+                        <div className="flex items-center space-x-2 border-b border-cyan-950/60 pb-2 mb-3">
+                          <Radio className="w-4.5 h-4.5 text-cyan-400 animate-pulse" />
                           <span className="text-xs font-bold text-slate-200">MAINFRAME NEWSFEEDS</span>
                         </div>
 
                         {/* Event Feed logger list */}
-                        <div className="space-y-2 text-[10px] text-purple-300 overflow-y-auto max-h-[350px] pr-1 scrollbar-none leading-relaxed">
+                        <div className="space-y-2 text-[10px] text-cyan-300 overflow-y-auto max-h-[350px] pr-1 scrollbar-none leading-relaxed">
                           {room.meetingLog.map((log, index) => (
-                            <div key={index} className="p-2.5 bg-purple-950/15 border border-purple-950/40 rounded-lg">
+                            <div key={index} className="p-2.5 bg-cyan-950/15 border border-cyan-950/40 rounded-lg">
                               {log}
                             </div>
                           ))}
                         </div>
                       </div>
 
-                      <div className="border-t border-purple-950/60 pt-2 text-[9px] text-purple-600">
-                        STATUS: SYNCED // MULTI_CHANNEL
+                      <div className="border-t border-cyan-950/60 pt-2 text-[9px] text-cyan-600">
+                        STATUS: SYNCED // STATIC_LOCAL_MULTITAB_POOL
                       </div>
                     </div>
                   </div>
@@ -854,7 +848,7 @@ export default function App() {
 
       {/* FOOTER */}
       <footer className="bg-[#05020c] border-t border-purple-950 py-3 px-6 text-center text-[10px] text-purple-600/60 font-mono shrink-0">
-        <span>NEON SHADOWS Cyberpunk Deception Game // POWERED BY GEMINI 3.5 AI DIALOGUES // ECLIPSE_W9_INC</span>
+        <span>NEON SHADOWS Cyberpunk Deception Game // DIRECT CLIENT BROWSER GEMINI 3.5 DIALOGUES // ECLIPSE_W9_INC</span>
       </footer>
 
       {/* FLOATING OVERLAY MODALS */}

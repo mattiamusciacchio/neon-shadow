@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Play, Sparkles, Server, User, Cpu, Info } from "lucide-react";
 
 interface LobbyScreenProps {
-  onJoin: (roomId: string, playerName: string, isSingleplayer: boolean) => void;
+  onJoin: (roomId: string, playerName: string, isSingleplayer: boolean, apiKey: string) => void;
   loading: boolean;
 }
 
@@ -13,11 +13,12 @@ export default function LobbyScreen({ onJoin, loading }: LobbyScreenProps) {
     return `Detective_${randomSuffix}`;
   });
   const [isSingleplayer, setIsSingleplayer] = useState(true);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!playerName.trim() || !roomId.trim()) return;
-    onJoin(roomId.trim().toUpperCase(), playerName.trim(), isSingleplayer);
+    onJoin(roomId.trim().toUpperCase(), playerName.trim(), isSingleplayer, apiKey.trim());
   };
 
   return (
@@ -118,6 +119,34 @@ export default function LobbyScreen({ onJoin, loading }: LobbyScreenProps) {
               </span>
             </div>
           )}
+
+          {/* Gemini API Key Panel */}
+          <div className="space-y-1 relative z-10">
+            <label className="text-[10px] text-fuchsia-400 font-bold uppercase tracking-wider flex items-center justify-between mono">
+              <span className="flex items-center space-x-1">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>CHIAVE API DI GEMINI (OPZIONALE)</span>
+              </span>
+              {apiKey ? (
+                <span className="text-emerald-400 font-bold text-[9px] animate-pulse">ATTIVA</span>
+              ) : (
+                <span className="text-amber-500 font-bold text-[9px]">FALLBACK LOCAL</span>
+              )}
+            </label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                localStorage.setItem("gemini_api_key", e.target.value);
+              }}
+              placeholder="Incolla la tua chiave API di Gemini..."
+              className="w-full bg-black/80 border border-fuchsia-500/30 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-fuchsia-450 focus:ring-1 focus:ring-fuchsia-450 text-slate-100 placeholder-slate-800 font-mono"
+            />
+            <span className="text-[9px] text-fuchsia-500/70 block leading-snug">
+              Se inserisci la tua API Key, comunicherai direttamente con l'IA di Gemini realistica per gli interrogatori. Altrimenti il gioco userà risposte cyberpunk fallback simulate offline.
+            </span>
+          </div>
 
           {/* Submit Action */}
           <button
